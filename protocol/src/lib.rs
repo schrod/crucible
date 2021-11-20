@@ -148,6 +148,22 @@ impl Default for CrucibleEncoder {
     }
 }
 
+fn uuids_are_equal(uuid1: &Uuid, uuid2: &Uuid) -> bool {  
+    uuid1 == uuid2 
+}
+
+impl Message {
+    //Check if a message uuid matches the expected value on uuid containing varients, otherwise true
+    pub fn has_uuid_and_it_doesnt_match(&self, expected_uuid: &Uuid) -> bool {
+        match self {
+            Message::Write(uuid, _ds_id, _dependencies, _writes) => !uuids_are_equal(expected_uuid, &uuid),
+            Message::Flush(uuid, _ds_id, _dependencies, _flush_number, _gen_number) => !uuids_are_equal(expected_uuid, &uuid),
+            Message::ReadRequest(uuid, _ds_id, _dependencies, _requests) => !uuids_are_equal(expected_uuid, &uuid),            
+            _ => false
+        }
+        
+    }
+}
 /*
  * A frame is [len | serialized message].
  */

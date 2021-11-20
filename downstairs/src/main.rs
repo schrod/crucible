@@ -395,7 +395,14 @@ async fn proc_frame(
     fw: &mut Arc<Mutex<FramedWrite<OwnedWriteHalf, CrucibleEncoder>>>,
     job_channel_tx: &Arc<Mutex<Sender<u64>>>,
 ) -> Result<()> {
-    let mut new_ds_id = None;
+    let mut new_work = None;
+    
+    if m.has_uuid_and_it_doesnt_match(&upstairs_uuid) {
+        let mut fw = fw.lock().await;
+        fw.send(Message::UuidMismatch(upstairs_uuid)).await?;
+        return Ok(());
+    }
+
     match m {
         Message::Ruok => {
             let mut fw = fw.lock().await;
@@ -403,62 +410,35 @@ async fn proc_frame(
         }
         // Regular work path
         Message::Write(uuid, ds_id, dependencies, writes) => {
-            if upstairs_uuid != *uuid {
-                let mut fw = fw.lock().await;
-                fw.send(Message::UuidMismatch(upstairs_uuid)).await?;
-                return Ok(());
-            }
-
-            let new_write = IOop::Write {
+            new_work = Some((*uuid, *ds_id, IOop::Write {
                 dependencies: dependencies.to_vec(),
                 writes: writes.to_vec(),
-            };
-
-            let d = ad.lock().await;
-            d.add_work(*uuid, *ds_id, new_write).await?;
-            new_ds_id = Some(*ds_id);
+            }));
+            
         }
-        Message::Flush(uuid, ds_id, dependencies, flush_number, gen_number) => {
-            if upstairs_uuid != *uuid {
-                let mut fw = fw.lock().await;
-                fw.send(Message::UuidMismatch(upstairs_uuid)).await?;
-                return Ok(());
-            }
-
-            let new_flush = IOop::Flush {
+        Message::Flush(uuid, ds_id, dependencies, flush_number, gen_number) => {            
+            new_work = Some((*uuid, *ds_id, IOop::Flush {
                 dependencies: dependencies.to_vec(),
                 flush_number: *flush_number,
                 gen_number: *gen_number,
-            };
-
-            let d = ad.lock().await;
-            d.add_work(*uuid, *ds_id, new_flush).await?;
-            new_ds_id = Some(*ds_id);
+            }));
         }
         Message::ReadRequest(uuid, ds_id, dependencies, requests) => {
-            if upstairs_uuid != *uuid {
-                let mut fw = fw.lock().await;
-                fw.send(Message::UuidMismatch(upstairs_uuid)).await?;
-                return Ok(());
-            }
-
-            let new_read = IOop::Read {
+            new_work = Some((*uuid, *ds_id, IOop::Read {
                 dependencies: dependencies.to_vec(),
                 requests: requests.to_vec(),
-            };
-
-            let d = ad.lock().await;
-            d.add_work(*uuid, *ds_id, new_read).await?;
-            new_ds_id = Some(*ds_id);
+            }));
         }
         x => bail!("unexpected frame {:?}", x),
     }
-
+    
     /*
-     * If we added work, tell the work task to get busy.
+     * If we have work, add it and tell the work task to get busy.
      */
-    if let Some(new_ds_id) = new_ds_id {
-        job_channel_tx.lock().await.send(new_ds_id).await?;
+    if let Some(new_work) = new_work {
+        let d = ad.lock().await;
+        d.add_work(new_work.0, new_work.1, new_work.2).await?;
+        job_channel_tx.lock().await.send(new_work.1).await?;        
     }
 
     Ok(())
