@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use tokio_util::codec::{Decoder, Encoder};
 use uuid::Uuid;
 
+pub mod handshake;
+
 const MAX_FRM_LEN: usize = 100 * 1024 * 1024; // 100M
 
 use crucible_common::{Block, CrucibleError, RegionDefinition};

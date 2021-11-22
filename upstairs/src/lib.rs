@@ -14,6 +14,7 @@ use std::time::Duration;
 
 pub use crucible_common::*;
 use crucible_protocol::*;
+use crucible_protocol::handshake::*;
 
 use anyhow::{anyhow, bail, Result};
 pub use bytes::{Bytes, BytesMut};
@@ -412,6 +413,20 @@ async fn io_send(
     Ok(false)
 }
 
+
+struct HandshakeFramedInterface<'a, T, E> {
+    fw: &'a FramedWrite<T, E>,
+}
+
+impl<T, E> HandshakeInterface for HandshakeFramedInterface<'_, T, E>  {    
+    fn send_message(&mut self, message: Message) -> Result<()>
+    {
+        async {
+            self.fw.send(message).await?; Ok(())
+        }
+    }
+}
+
 /*
  * Once we have a connection to a downstairs, this task takes over and
  * handles the initial negotiation.
@@ -460,10 +475,19 @@ async fn proc(
     }
 
     let mut self_promotion = false;
+
     /*
-     * As the "client", we must begin the negotiation.
+     * Setup the handshake process
      */
-    fw.send(Message::HereIAm(1, up.uuid)).await?;
+    let mut handshake_framed_interface = HandshakeFramedInterface {
+          fw: &fw,
+        };
+    let mut handshake = HandshakeProcess::new(
+        HandshakeRole::Upstairs,
+        &mut handshake_framed_interface,
+        up.uuid
+        );
+    handshake.start();
 
     /*
      * Used to track where we are in the current negotiation.
